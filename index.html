@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ARCHFLOW • CPU Instruction Pipeline Visualizer with Assembly Parser</title>
+  <meta name="description" content="Interactive 5-stage CPU instruction pipeline visualizer, DFA assembly lexer, and DAG topological sorting optimizer connecting FLAT, COA, and DAA.">
+  
+  <!-- Modern Typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top Global Header -->
+    <header class="app-header">
+      <div class="header-branding">
+        <div class="logo-mark">
+          <span class="logo-core">⚡</span>
+        </div>
+        <div>
+          <h1 class="app-title">ARCHFLOW <span class="title-sub">Pipeline Visualizer</span></h1>
+          <p class="app-subtitle">Tri-Subject Engineering Tool: <strong>FLAT</strong> (DFA Lexer) • <strong>COA</strong> (5-Stage Pipeline) • <strong>DAA</strong> (DAG Kahn's Topo Sort)</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <!-- Preset Dropdown -->
+        <div class="control-group">
+          <label for="preset-select" class="control-label">Load Program:</label>
+          <select id="preset-select" class="select-input">
+            <option value="classic">Classic RAW Hazard (4 Insts)</option>
+            <option value="interleaved">Interleaving Benchmark (High Speedup)</option>
+            <option value="load_use">Load-Use Hazard & Forwarding Unit</option>
+            <option value="deep_chain">Deep Dependency Chain with Floater</option>
+            <option value="dfa_syntax_error">FLAT Syntax Error & DFA Trap</option>
+          </select>
+        </div>
+
+        <!-- Forwarding Unit Toggle -->
+        <div class="control-group toggle-group">
+          <label class="toggle-switch" for="forwarding-toggle" title="Toggle Hardware Data Forwarding Unit (EX->EX, MEM->EX)">
+            <input type="checkbox" id="forwarding-toggle">
+            <span class="toggle-slider"></span>
+          </label>
+          <div class="toggle-meta">
+            <span class="toggle-title">Data Forwarding</span>
+            <span id="forwarding-status-badge" class="badge badge-neutral">NO FORWARDING</span>
+          </div>
+        </div>
+
+        <!-- Python CLI Modal Trigger -->
+        <button id="btn-view-python" class="btn btn-outline" title="View & Download Python CLI Script">
+          <span class="btn-icon">🐍</span> Python CLI
+        </button>
+
+        <!-- GitHub Repo Link -->
+        <a href="https://github.com/bizcodz/cpu-pipeline-visualizer" target="_blank" rel="noopener noreferrer" class="btn btn-outline" title="View Source on GitHub" style="text-decoration: none; display: inline-flex; align-items: center; gap: 6px;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          <span>GitHub</span>
+        </a>
+      </div>
+    </header>
+
+    <!-- Main Workspace Layout -->
+    <main class="workspace-grid">
+      <!-- Left Column: Code Editor & Presets -->
+      <section class="editor-pane">
+        <div class="pane-header">
+          <div class="pane-title-group">
+            <span class="pane-icon">📝</span>
+            <h2 class="pane-heading">Assembly Editor</h2>
+          </div>
+          <span class="badge badge-accent">FLAT Parser Active</span>
+        </div>
+
+        <div class="preset-info-banner">
+          <span class="info-icon">ℹ️</span>
+          <span id="preset-description">Demonstrates RAW hazards and Kahn's topological sort reordering.</span>
+        </div>
+
+        <!-- Live Code Editor -->
+        <div class="editor-container">
+          <textarea id="assembly-input" class="code-editor" spellcheck="false" placeholder="Enter assembly instructions here... (e.g. LOAD R1, 0)"></textarea>
+        </div>
+
+        <!-- FLAT Lexer Error Banner -->
+        <div id="editor-error-banner" class="error-banner hidden"></div>
+
+        <!-- Instruction Reference Cheatsheet -->
+        <div class="cheatsheet-card">
+          <h3 class="cheatsheet-title">Supported Instructions (ISA)</h3>
+          <div class="isa-chips">
+            <span class="isa-chip" title="Integer Add: Rd = Rs1 + Rs2"><code>ADD Rd, Rs1, Rs2</code></span>
+            <span class="isa-chip" title="Integer Sub: Rd = Rs1 - Rs2"><code>SUB Rd, Rs1, Rs2</code></span>
+            <span class="isa-chip" title="Integer Mul: Rd = Rs1 * Rs2"><code>MUL Rd, Rs1, Rs2</code></span>
+            <span class="isa-chip" title="Load Word: Rd = imm or [Rs]"><code>LOAD Rd, imm</code></span>
+            <span class="isa-chip" title="Store Word: [Rd] = Rs or imm"><code>STORE Rs, imm</code></span>
+            <span class="isa-chip" title="Pipeline Bubble"><code>NOP</code></span>
+          </div>
+          <small class="text-muted">Registers: <code>R0</code> to <code>R31</code>. Comments start with <code>;</code> or <code>#</code></small>
+        </div>
+      </section>
+
+      <!-- Right Column: Visualizer & Subject Panels -->
+      <section class="visualizer-pane">
+        <!-- Top Performance Metric Dashboard -->
+        <div class="metrics-dashboard">
+          <div class="metric-card">
+            <div class="metric-header">
+              <span class="metric-title">Pipeline Duration</span>
+              <span id="speedup-badge" class="metric-trend trend-positive">Speedup Active</span>
+            </div>
+            <div class="metric-values">
+              <div class="metric-stat">
+                <span class="stat-label">Original</span>
+                <span id="metric-orig-cycles" class="stat-num stat-orig">12</span>
+                <span class="stat-unit">Cycles</span>
+              </div>
+              <div class="metric-arrow">➔</div>
+              <div class="metric-stat">
+                <span class="stat-label">DAA Optimized</span>
+                <span id="metric-opt-cycles" class="stat-num stat-opt">11</span>
+                <span class="stat-unit">Cycles</span>
+              </div>
+              <div class="metric-delta">
+                <span id="metric-saved-cycles" class="delta-badge">-1</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-header">
+              <span class="metric-title">Stall Bubbles (RAW)</span>
+              <span class="metric-tag">COA Hazards</span>
+            </div>
+            <div class="metric-values">
+              <div class="metric-stat">
+                <span class="stat-label">Before</span>
+                <span id="metric-orig-stalls" class="stat-num stat-danger">4</span>
+              </div>
+              <div class="metric-arrow">➔</div>
+              <div class="metric-stat">
+                <span class="stat-label">After Kahn's</span>
+                <span id="metric-opt-stalls" class="stat-num stat-success">3</span>
+              </div>
+              <div class="metric-delta">
+                <span id="metric-saved-stalls" class="delta-badge">-1</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-header">
+              <span class="metric-title">Speedup Factor</span>
+              <span class="metric-tag">DAA Efficiency</span>
+            </div>
+            <div class="metric-values single-val">
+              <span id="metric-speedup" class="stat-num stat-highlight">1.09x (+8.3%)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Subject Navigation Tabs -->
+        <div class="panel-tab-bar">
+          <button class="panel-tab-btn active" data-target="tab-timeline">
+            <span class="tab-icon">📊</span> COA 5-Stage Timeline
+          </button>
+          <button class="panel-tab-btn" data-target="tab-dag">
+            <span class="tab-icon">🕸️</span> DAA Dependency DAG & Kahn's
+          </button>
+          <button class="panel-tab-btn" data-target="tab-dfa">
+            <span class="tab-icon">⚡</span> FLAT DFA Automaton
+          </button>
+          <button class="panel-tab-btn" data-target="tab-report">
+            <span class="tab-icon">📚</span> Theory & Syllabus Report
+          </button>
+        </div>
+
+        <!-- TAB 1: COA Timeline & Pipeline Grid -->
+        <div id="tab-timeline" class="tab-content-panel active">
+          <!-- Timeline View Sub-Tabs (Original / Optimized / Comparison) -->
+          <div class="timeline-controls-bar">
+            <div class="view-mode-tabs">
+              <button class="view-tab-btn active" data-view="original">Original Sequence</button>
+              <button class="view-tab-btn" data-view="optimized">DAA Kahn's Optimized</button>
+              <button class="view-tab-btn" data-view="comparison">Side-by-Side Comparison</button>
+            </div>
+
+            <!-- Cycle Playback Controller -->
+            <div class="playback-controls">
+              <button id="btn-reset-cycle" class="btn btn-icon-only" title="Reset to Cycle 1">⏮</button>
+              <button id="btn-prev-cycle" class="btn btn-icon-only" title="Step Back 1 Cycle">◀</button>
+              <button id="btn-play" class="btn btn-primary btn-sm">▶ Play</button>
+              <button id="btn-next-cycle" class="btn btn-icon-only" title="Step Forward 1 Cycle">▶</button>
+              
+              <div class="scrubber-wrapper">
+                <input type="range" id="cycle-scrubber" min="1" max="15" value="1" class="scrubber-slider">
+                <span id="current-cycle-display" class="cycle-indicator">Cycle 1 / 12</span>
+              </div>
+
+              <select id="speed-select" class="select-input select-sm" title="Playback Speed">
+                <option value="1200">0.5x Speed</option>
+                <option value="800" selected>1.0x Speed</option>
+                <option value="400">2.0x Speed</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Live Pipeline Latches Telemetry Bar -->
+          <div class="pipeline-latches-card">
+            <div class="latches-header">
+              <span class="latches-title">Current Latch States (Cycle Step Telemetry):</span>
+              <div id="latch-hazard-alert" class="latch-alert hidden"></div>
+            </div>
+            <div class="latches-grid">
+              <div class="latch-box">
+                <span class="latch-label">IF / ID</span>
+                <span id="latch-if" class="latch-val">I0</span>
+              </div>
+              <div class="latch-box">
+                <span class="latch-label">ID / EX</span>
+                <span id="latch-id" class="latch-val">—</span>
+              </div>
+              <div class="latch-box">
+                <span class="latch-label">EX / MEM</span>
+                <span id="latch-ex" class="latch-val">—</span>
+              </div>
+              <div class="latch-box">
+                <span class="latch-label">MEM / WB</span>
+                <span id="latch-mem" class="latch-val">—</span>
+              </div>
+              <div class="latch-box">
+                <span class="latch-label">Retiring (WB)</span>
+                <span id="latch-wb" class="latch-val">—</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Single Timeline Container -->
+          <div id="single-timeline-wrapper" class="timeline-display-area">
+            <div id="timeline-grid-single"></div>
+          </div>
+
+          <!-- Comparison Timeline Container (Side-by-Side) -->
+          <div id="comparison-timeline-wrapper" class="timeline-display-area hidden">
+            <div id="timeline-grid-orig-comp" class="comp-box"></div>
+            <div id="timeline-grid-opt-comp" class="comp-box"></div>
+          </div>
+
+          <!-- Pipeline Stage Legend -->
+          <div class="stage-legend">
+            <div class="legend-item"><span class="stage-badge badge-if">IF</span> Instruction Fetch</div>
+            <div class="legend-item"><span class="stage-badge badge-id">ID</span> Decode & Register Read</div>
+            <div class="legend-item"><span class="stage-badge badge-ex">EX</span> Execute & ALU Compute</div>
+            <div class="legend-item"><span class="stage-badge badge-mem">MEM</span> Memory Read/Write</div>
+            <div class="legend-item"><span class="stage-badge badge-wb">WB</span> Register Write Back</div>
+            <div class="legend-item"><span class="stage-badge badge-stall">STALL</span> RAW Hazard Bubble</div>
+          </div>
+        </div>
+
+        <!-- TAB 2: DAA Dependency DAG & Kahn's Topological Sort -->
+        <div id="tab-dag" class="tab-content-panel">
+          <div class="dag-panel-layout">
+            <div class="dag-header-bar">
+              <div>
+                <h3 class="panel-section-title">Instruction Dependency Graph (DAG)</h3>
+                <p class="panel-section-desc">Directed edges indicate RAW true data dependencies. Instructions can execute once in-degree reaches 0.</p>
+              </div>
+              <div class="dag-legend">
+                <span class="legend-pill pill-raw">RAW Dependency</span>
+                <span class="legend-pill pill-zero">In-Degree: 0 (Ready)</span>
+              </div>
+            </div>
+
+            <!-- SVG Container for DAG -->
+            <div id="dag-container" class="dag-canvas-card"></div>
+
+            <!-- Kahn's Algorithm Step-by-Step Trace Table -->
+            <div class="kahn-trace-card">
+              <h4 class="trace-title">Kahn's Algorithm Execution Trace (Topological Reordering)</h4>
+              <div class="trace-table-scroll">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Step</th>
+                      <th>Selected Node</th>
+                      <th>Ready Queue (In-Degree = 0)</th>
+                      <th>Unblocked Successors</th>
+                      <th>Scheduling Heuristic Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody id="kahn-trace-tbody">
+                    <!-- Populated by JavaScript -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 3: FLAT DFA Automaton & Token Inspector -->
+        <div id="tab-dfa" class="tab-content-panel">
+          <div class="dfa-panel-layout">
+            <div class="dfa-header-bar">
+              <div>
+                <h3 class="panel-section-title">FLAT DFA State Transition Automaton</h3>
+                <p class="panel-section-desc">Formal DFA: <code>M = (Q, Σ, δ, q₀, F)</code> tokenizes and validates assembly syntax character by character.</p>
+              </div>
+              <div class="control-group">
+                <label for="dfa-line-select" class="control-label">Inspect Line:</label>
+                <select id="dfa-line-select" class="select-input"></select>
+              </div>
+            </div>
+
+            <!-- DFA Visual State Diagram (SVG) -->
+            <div id="dfa-canvas-container" class="dfa-canvas-card"></div>
+
+            <!-- Step Scrubber and Transition Equation -->
+            <div id="dfa-step-container" class="dfa-step-wrapper"></div>
+
+            <!-- Formal Grammar & Transition Table -->
+            <div class="dfa-formal-card">
+              <h4 class="formal-title">Formal Language & Automata Theory (FLAT) Specification</h4>
+              <div class="formal-grid">
+                <div class="formal-box">
+                  <strong>Alphabet (Σ):</strong>
+                  <code>[A-Z], [0-9], 'R', ',', '[', ']', whitespace, EOF</code>
+                </div>
+                <div class="formal-box">
+                  <strong>Start State (q₀):</strong>
+                  <code>q0 (leading space / ready)</code>
+                </div>
+                <div class="formal-box">
+                  <strong>Accepting States (F):</strong>
+                  <code>q_accept, q_op (NOP), q_imm, q_r3_num</code>
+                </div>
+                <div class="formal-box">
+                  <strong>Trap State:</strong>
+                  <code>q_reject (syntax error)</code>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 4: Academic Report & Syllabus Synthesis -->
+        <div id="tab-report" class="tab-content-panel">
+          <div class="academic-report-card">
+            <h2>Course Synthesis Project Report</h2>
+            <div class="report-meta">
+              <span><strong>Subjects:</strong> FLAT • COA • DAA</span>
+              <span><strong>System:</strong> ARCHFLOW Pipeline Simulator</span>
+            </div>
+
+            <div class="report-section">
+              <h3>1. Subject Connection & Role Architecture</h3>
+              <table class="report-table">
+                <thead>
+                  <tr>
+                    <th>Subject</th>
+                    <th>Topic Used</th>
+                    <th>Implementation in Project</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><strong>FLAT</strong></td>
+                    <td>Regular Expressions & DFA (Unit 1.5, 2.7)</td>
+                    <td>The <strong>Lexer</strong> validates assembly strings character-by-character using a state transition function <code>δ(q, c)</code>, trapping invalid register identifiers or malformed syntax into <code>q_reject</code>.</td>
+                  </tr>
+                  <tr>
+                    <td><strong>COA</strong></td>
+                    <td>5-Stage Pipelining & RAW Hazards (Unit 3.1, 3.7)</td>
+                    <td>The <strong>Pipeline Engine</strong> models <code>IF</code>, <code>ID</code>, <code>EX</code>, <code>MEM</code>, and <code>WB</code> latches. It detects Read-After-Write data hazards and inserts precise stall cycles, with a toggleable Hardware Forwarding Unit.</td>
+                  </tr>
+                  <tr>
+                    <td><strong>DAA</strong></td>
+                    <td>DAGs & Topological Sorting (Unit 1.11, Kahn's Algorithm)</td>
+                    <td>The <strong>Instruction Optimizer</strong> models true data dependencies as a Directed Acyclic Graph. Kahn's algorithm reorders independent instructions to fill RAW latency slots, maximizing pipeline throughput.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="report-section">
+              <h3>2. Theoretical Analysis & Latency Model</h3>
+              <p>In a standard 5-stage MIPS pipeline without forwarding, an ALU instruction produces its result in the <code>EX</code> stage (Cycle 3) and writes back to the register file in the first half of the <code>WB</code> stage (Cycle 5). A dependent instruction reading that register in <code>ID</code> must stall for <strong>2 clock cycles</strong>.</p>
+              <p>When the DAA optimizer applies Kahn's algorithm, it identifies instructions with in-degree 0 that do not read registers modified by recent instructions, inserting them into the bubble slots. This reduces pipeline duration from <code>12 cycles</code> to <code>11 cycles</code> (or more on larger basic blocks) with zero semantic deviation.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Python Script Modal -->
+    <div id="python-modal" class="modal-overlay hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div class="modal-title-group">
+            <span class="modal-icon">🐍</span>
+            <h3>Python CLI Simulator Source (pipeline_sim.py)</h3>
+          </div>
+          <button id="btn-close-python-modal" class="btn-close">&times;</button>
+        </div>
+        <p class="modal-desc">Standalone zero-dependency Python 3 script matching this exact web simulator. Run directly via terminal.</p>
+        <pre class="code-preview"><code id="python-code-block">python pipeline_sim.py --code "LOAD R1, 0\nADD R2, R1, R3\nSUB R4, R2, R5\nMUL R6, R7, R8"</code></pre>
+        <div class="modal-footer">
+          <button id="btn-copy-python" class="btn btn-primary">Copy CLI Command</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="lexer.js"></script>
+  <script src="pipeline.js"></script>
+  <script src="optimizer.js"></script>
+  <script src="graph_visualizer.js"></script>
+  <script src="dfa_visualizer.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
